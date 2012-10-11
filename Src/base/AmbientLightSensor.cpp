@@ -31,7 +31,7 @@
 
 #include <cjson/json.h>
 #include <glib.h>
-#if defined (TARGET_DEVICE)
+#if defined(HAS_LUNA_PREF)
 #include <lunaprefs.h>
 #endif
 #include <lunaservice.h>
@@ -46,6 +46,10 @@
 
 AmbientLightSensor* AmbientLightSensor::m_instance = NULL;
 
+/*! \page com_palm_ambient_light_sensor_control Service API com.palm.ambientLightSensor/control/
+ *  Public methods:
+ *  - \ref com_palm_ambient_light_sensor_control_status
+ */
 static LSMethod alsMethods[] = {
     {"status", AmbientLightSensor::controlStatus},
     {},
@@ -117,18 +121,6 @@ AmbientLightSensor::AmbientLightSensor ()
         LSErrorFree (&lserror);
     }
 
-
-#if defined (MACHINE_CASTLE)
-
-    m_alsEnabled = true; 
-
-    m_alsBorder[0] = 10  * ALS_SAMPLE_SIZE; 
-    m_alsBorder[1] = 200 * ALS_SAMPLE_SIZE;
-
-    m_alsMargin[0] = 2 * ALS_SAMPLE_SIZE;
-    m_alsMargin[1] = (m_alsBorder[1] / 10) > (ALS_SAMPLE_SIZE * 2) ?  m_alsBorder[1] / 10 : ALS_SAMPLE_SIZE * 2;
-
-#else
     if (Settings::LunaSettings()->enableAls) {
 	m_alsEnabled = true; 
 
@@ -153,8 +145,6 @@ AmbientLightSensor::AmbientLightSensor ()
         g_warning ("%s: ALS is not enabled", __PRETTY_FUNCTION__); 
 
     }
-
-#endif
 
     m_instance = this;
 
@@ -199,7 +189,7 @@ bool AmbientLightSensor::stop ()
 
 bool AmbientLightSensor::on ()
 {
-#if defined (TARGET_DEVICE)
+#if defined(TARGET_DEVICE)
     LSError lserror;
     LSErrorInit(&lserror);
     bool result;
@@ -226,9 +216,7 @@ bool AmbientLightSensor::on ()
     m_alsCountInRegion = 0;
     m_alsSamplesNeeded = ALS_INIT_SAMPLE_SIZE;
     m_alsSampleList.clear();
-#if !defined (MACHINE_CASTLE)
     m_alsRegion = ALS_REGION_INDOOR;
-#endif
 
     /* fine-tuning support for NYX */
     InputControl* ic = HostBase::instance()->getInputControlALS();
@@ -280,125 +268,10 @@ bool AmbientLightSensor::off ()
 
 bool AmbientLightSensor::update (int intensity)
 {
-#if defined (MACHINE_CASTLE)
-    return updateAlsCastle (intensity);
-#else
     if (Settings::LunaSettings()->enableAls)
         return updateAls (intensity);
     else 
         return false;
-#endif
-}
-
-// this function is called only on castle due to the sensor limitations
-// the als region is calculated from a running average of the als values
-// this causes the als region change to occur slowly
-bool AmbientLightSensor::updateAlsCastle (int intensity)
-{
-#if defined (TARGET_DEVICE)
-    LSError lserror;
-    LSErrorInit(&lserror);
-    bool result = true;
-
-    int current = m_alsRegion;
-    int oldPtr = m_alsPointer;
-
-    if (m_alsSampleCount == 0)
-    {
-        // the first sample comes is, assume others will be close
-        int i = 0;
-        for ( ; i < m_alsSamplesNeeded ; i++)
-            m_alsValue[i] = intensity;
-        m_alsSum = intensity * m_alsSamplesNeeded;
-    }
-    else
-    {
-        m_alsSum -= m_alsValue[m_alsPointer];
-        m_alsValue[m_alsPointer] = intensity;
-        m_alsSum += intensity;
-    }
-
-    if (m_alsSampleCount < m_alsSamplesNeeded)
-    {
-        m_alsSampleCount++;
-        if (m_alsSampleCount == m_alsSamplesNeeded)
-        {
-            g_debug ("resetting ALS to sample at 1sec");
-
-            // switch to the slow mode
-            InputControl* ic = HostBase::instance()->getInputControlALS();
-            if (NULL != ic)
-            {
-                if (!ic->setRate(NYX_REPORT_RATE_LOW))
-                    return false;
-            }
-        }
-    }
-
-    m_alsPointer = (m_alsPointer + 1) % m_alsSamplesNeeded;
-
-    if (m_alsDisabled > 0)
-    {
-        m_alsRegion = ALS_REGION_UNDEFINED;
-        g_debug ("%s: reported light level of %i (%i) [region set to default by subscription]", __PRETTY_FUNCTION__, intensity, m_alsSum / m_alsSamplesNeeded);
-
-        goto end;
-    }
-
-    if (!m_alsEnabled)
-    {
-        m_alsRegion = ALS_REGION_UNDEFINED;
-        g_debug ("%s: reported light level of %i (%i) [device not calibrated]", __PRETTY_FUNCTION__, intensity, m_alsSum / m_alsSamplesNeeded);
-
-        goto end;
-    }
-
-    if (m_alsSum < m_alsBorder[0])
-    {
-        if (current == ALS_REGION_INDOOR && m_alsSum >= m_alsBorder[0] - m_alsMargin[0])
-            m_alsRegion = ALS_REGION_INDOOR;
-        else
-            m_alsRegion = ALS_REGION_DARK;
-    }
-    else if (m_alsSum < m_alsBorder[1])
-    {
-        if (current == ALS_REGION_DARK && m_alsSum < m_alsBorder[0] + m_alsMargin[0])
-            m_alsRegion = ALS_REGION_DARK;
-        else if (current == ALS_REGION_OUTDOOR && m_alsSum >= m_alsBorder[1] - m_alsMargin[1])
-            m_alsRegion = ALS_REGION_OUTDOOR;
-        else
-            m_alsRegion = ALS_REGION_INDOOR;
-    }
-    else
-    {
-        if (current == ALS_REGION_INDOOR && m_alsSum < m_alsBorder[1] + m_alsMargin[1])
-            m_alsRegion = ALS_REGION_INDOOR;
-        else
-            m_alsRegion = ALS_REGION_OUTDOOR;
-    }
-
-end:
-
-    if (m_alsSubscriptions > 0)
-    {
-        gchar *status = g_strdup_printf ("{\"returnValue\":true,\"current\":%i,\"average\":%i,\"region\":%i}",
-                m_alsValue[oldPtr], m_alsSum / m_alsSamplesNeeded, m_alsRegion);
-
-        if (NULL != status)
-            result = LSSubscriptionReply(m_service, "/control/status", status, &lserror);
-        if(!result)
-        {
-            LSErrorPrint (&lserror, stderr);
-            LSErrorFree (&lserror);
-        }
-        g_free(status);
-    }
-
-    // if there was no change return false, no need to update anything
-    return  (m_alsRegion != current);
-#else
-    return false;
-#endif
 }
 
 bool sortIncr (int32_t alsVal1, int32_t alsVal2) 
@@ -416,7 +289,7 @@ bool sortIncr (int32_t alsVal1, int32_t alsVal2)
 
 bool AmbientLightSensor::updateAls(int intensity)
 {
-#if defined (TARGET_DEVICE)
+#if defined(TARGET_DEVICE)
     LSError lserror;
     LSErrorInit(&lserror);
     bool result = true;
@@ -543,9 +416,106 @@ end:
 #endif
 }
 
+/*!
+\page com_palm_ambient_light_sensor_control
+\n
+\section com_palm_ambient_light_sensor_control_status status
+
+\e Public.
+
+com.palm.ambientLightSensor/control/status
+
+Get status and optionally enable or disable the ambient light sensor.
+
+\subsection com_palm_ambient_light_sensor_control_status_syntax Syntax:
+\code
+{
+    "subscribe": boolean,
+    "disableALS": boolean
+}
+\endcode
+
+\param subscribe Set to true to receive status updates.
+\param disableALS If \e subscribe is set to true, set this to true to disable the ambient light sensor.
+
+\subsection com_palm_ambient_light_sensor_control_status_returns_call Returns for a call:
+\code
+{
+    "returnValue": boolean,
+    "current": int,
+    "average": int,
+    "disabled": boolean,
+    "subscribed": boolean
+}
+\endcode
+
+\param returnValue Indicates if the call was succesful.
+\param current Current value of the ambient light sensor.
+\param average Average value of the ambient light sensor.
+\param disabled True if ambient light sensor is disabled.
+\param subscribed True if subscribed to receive status updates.
+
+\subsection com_palm_ambient_light_sensor_control_status_returns_status Returns for status updates:
+\code
+{
+    "returnValue": boolean,
+    "current": int,
+    "region": int
+}
+\endcode
+
+\param returnValue Indicates if the call was succesful.
+\param current Current value of the ambient light sensor.
+\param region A value between 0-4 describing the amount of ambient light:
+\li 0: Undefined, when the sensor is disabled.
+\li 1: Dark
+\li 2: Dim
+\li 3: Indoor
+\li 4: Outdoor
+
+\subsection com_palm_ambient_light_sensor_control_status_examples Examples:
+\code
+luna-send -n 1 -f luna://com.palm.ambientLightSensor/control/status '{ "subscribe": true, "disableALS": false }'
+\endcode
+
+Example response for a succesful call:
+\code
+{
+    "returnValue": true,
+    "current": 6,
+    "average": 187,
+    "disabled": true,
+    "subscribed": true
+}
+\endcode
+
+Example status updates:
+\code
+{
+    "returnValue": true,
+    "current": 184,
+    "region": 3
+}
+{
+    "returnValue": true,
+    "current": 179,
+    "region": 3
+}
+{
+    "returnValue": true,
+    "current": 171,
+    "region": 3
+}
+{
+    "returnValue": true,
+    "current": 66,
+    "region": 3
+}
+\endcode
+*/
 bool AmbientLightSensor::controlStatus(LSHandle *sh, LSMessage *message, void *ctx)
 {
-#if defined (TARGET_DEVICE)
+#if defined(TARGET_DEVICE)
     LSError lserror;
     LSErrorInit(&lserror);
     bool result = true;

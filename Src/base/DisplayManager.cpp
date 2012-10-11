@@ -48,7 +48,7 @@
 #include <glib.h>
 #include <lunaservice.h>
 
-#if defined(HAVE_LUNA_PREF)
+#if defined(HAS_LUNA_PREF)
 #include <lunaprefs.h>
 #endif
 
@@ -138,7 +138,7 @@
 #define DISPLAY_EVENT_OFF_CALL                       115
 #define DISPLAY_EVENT_HOME_BUTTON_UP                 116
 
-#ifdef TARGET_DEVICE
+#if defined(TARGET_DEVICE)
 extern "C" void setEglSwapInterval(int);
 #endif
 
@@ -156,6 +156,11 @@ typedef struct DisplayCallbackCtx
 static DisplayCallbackCtx_t publicCtx;
 static DisplayCallbackCtx_t privateCtx;
 
+/*! \page com_palm_display Service API com.palm.display/
+ *
+ * Public methods:
+ * - \ref com_palm_display_status
+ */
 // when using LSPalmServiceRegisterCategory, the public methods are mirrored
 // in the private methods
 static LSMethod publicDisplayMethods[] = {
@@ -163,6 +168,14 @@ static LSMethod publicDisplayMethods[] = {
     {},
 };
 
+/*! \page com_palm_display_control Service API com.palm.display/control/
+ *
+ * Private methods:
+ * - \ref com_palm_display_control_set_state
+ * - \ref com_palm_display_control_set_property
+ * - \ref com_palm_display_control_get_property
+ * - \ref com_palm_display_control_status
+ */
 static LSMethod privateDisplayMethods[] = {
     {"setState", DisplayManager::controlSetState},
     {"setProperty", DisplayManager::controlSetProperty},
@@ -387,7 +400,7 @@ DisplayManager::DisplayManager()
     // initialize als
     m_als = new AmbientLightSensor ();
 
-#if defined(HAVE_LUNA_PREF)
+#if defined(HAS_LUNA_PREF)
     char *build = NULL;
     LPErr err = LPSystemCopyStringValue ("com.palm.properties.buildName", &build);
     if (LP_ERR_NONE == err && NULL != build)
@@ -402,7 +415,7 @@ DisplayManager::DisplayManager()
 #endif
 
     // get the default brightness
-#if defined(HAVE_LUNA_PREF)
+#if defined(HAS_LUNA_PREF)
     LPAppHandle prefHandle = NULL;
     LPErr e = LPAppGetHandle (DISPLAY_APPID, &prefHandle);
     if (LP_ERR_NONE == e && prefHandle)
@@ -680,7 +693,7 @@ bool DisplayManager::powerdServiceNotification(LSHandle *sh, const char *service
         g_message ("%s: calling on()", __PRETTY_FUNCTION__);
         dm->on ();
     }
-#if !defined (TARGET_DEVICE)
+#if !defined(TARGET_DEVICE)
     // dont (ever) go to sleep in the emulator
     dm->pushDNAST ("LunaSysMgr-on-Desktop");
 #endif
@@ -1144,6 +1157,62 @@ error:
     return true;
 }
 
+/*!
+\page com_palm_display_control
+\n
+\section com_palm_display_control_set_state setState
+
+\e Private.
+
+com.palm.display/control/setState
+
+Set the state of the display.
+
+\subsection com_palm_display_control_set_state_syntax Syntax:
+\code
+{
+    "state": string
+}
+\endcode
+
+\param state The state to which the display is set. Can be:
+\li on
+\li dimmed
+\li off
+\li unlock
+\li dock
+\li undock
+
+\subsection com_palm_display_control_set_state_returns Returns:
+\code
+{
+    "returnValue": boolean,
+    "errorText": string
+}
+\endcode
+
+\param
+
+\subsection com_palm_display_control_set_state_examples Examples:
+\code
+luna-send -n 1 -f luna://com.palm.display/control/setState '{ "state": "dock" }'
+\endcode
+
+Example response for a succesful call:
+\code
+{
+    "returnValue": true
+}
+\endcode
+
+Example response for a failed call:
+\code
+{
+    "returnValue": false,
+    "errorText": "call failed"
+}
+\endcode
+*/
 bool DisplayManager::controlSetState(LSHandle *sh, LSMessage *message, void *ctx)
 {
     LSError lserror;
@@ -1485,6 +1554,73 @@ bool DisplayManager::setTimeout (int timeoutInMs)
     return true;
 }
 
+/*!
+\page com_palm_display_control
+\n
+\section com_palm_display_control_get_property getProperty
+
+\e Private.
+
+com.palm.display/control/getProperty
+
+Get display properties.
+
+\subsection com_palm_display_control_get_property_syntax Syntax:
+\code
+{
+    "properties": [string array]
+}
+\endcode
+
+\param properties List of properties to get, can include one or more of the following:
+\li requestBlock
+\li powerKeyBlock
+\li timeout
+\li maximumBrightness
+\li onWhenConnected
+\li proximityEnabled
+
+\subsection com_palm_display_control_get_property_returns Returns:
+\code
+{
+    "returnValue": boolean,
+    "<property name>": <value>,
+    ...
+    "<property name>": <value>,
+    "errorCode": int,
+    "errorText": string
+}
+\endcode
+
+\param returnValue Indicates if the call was succesful.
+\param errorCode Code for the error if call was not succesful.
+\param errorText Describes the error if call was not succesful.
+
+\subsection com_palm_display_control_get_property_examples Examples:
+\code
+luna-send -n 1 -f luna://com.palm.display/control/getProperty '{ "properties": ["maximumBrightness", "timeout", "requestBlock", "onWhenConnected" ] } '
+\endcode
+
+Example response for a succesful call:
+\code
+{
+    "returnValue": true,
+    "maximumBrightness": 75,
+    "timeout": 120,
+    "requestBlock": false,
+    "onWhenConnected": false
+}
+\endcode
+
+Example response for a failed call:
+\code
+{
+    "returnValue": false,
+    "errorCode": 1,
+    "errorText": "failed to get property"
+}
+\endcode
+*/
 bool DisplayManager::controlGetProperty(LSHandle *sh, LSMessage *message, void *ctx)
 {
     LSError lserror;
@@ -1582,6 +1718,72 @@ done:
     return true;
 }
 
+/*!
+\page com_palm_display_control
+\n
+\section com_palm_display_control_set_property setProperty
+
+\e Private.
+
+com.palm.display/control/setProperty
+
+Set display properties.
+
+\subsection com_palm_display_control_set_property_syntax Syntax:
+\code
+{
+    "requestBlock": boolean,
+    "client": string,
+    "powerKeyBlock": boolean,
+    "timeout": integer,
+    "onWhenConnected": boolean,
+    "maximumBrightness": integer,
+    "proximityEnabled": boolean
+}
+\endcode
+
+\param requestBlock Block changes of display state. Requires \e client parameter to be set.
+\param client Client ID.
+\param powerKeyBlock Block the power key. Requires \e client parameter to be set.
+\param timeout Timeout in seconds for the display to turn off.
+\param onWhenConnected Should the display remain on when a USB cable is connected to the device.
+\param maximumBrightness Display maximum brightness.
+\param proximityEnabled Toggle proximity sensor. Requires \e client parameter to be set.
+
+\subsection com_palm_display_control_set_property_returns Returns:
+\code
+{
+    "returnValue": boolean,
+    "errorCode": int,
+    "errorText": string
+}
+\endcode
+
+\param returnValue Indicates if the call was succesful.
+\param errorCode Code for the error if call was not succesful.
+\param errorText Describes the error if call was not succesful.
+
+\subsection com_palm_display_control_set_property_examples Examples:
+\code
+luna-send -n 1 -f luna://com.palm.display/control/setProperty '{ "timeout": 140 }'
+\endcode
+
+Example response for a succesful call:
+\code
+{
+    "returnValue": true
+}
+\endcode
+
+Example response for a failed call:
+\code
+{
+    "returnValue": false,
+    "errorCode": 22,
+    "errorText": "'powerKeyBlock' needs 'client' string"
+}
+\endcode
+*/
 bool DisplayManager::controlSetProperty(LSHandle *sh, LSMessage *message, void *ctx)
 {
     LSError lserror;
@@ -1852,42 +2054,23 @@ int32_t DisplayManager::getDisplayBrightness()
     }
 
     if (Preferences::instance()->isAlsEnabled()) {
-    // Pixie ALS is now functional
+		int region = m_als->getCurrentRegion ();
 
-    int region = m_als->getCurrentRegion ();
-
-#if defined (MACHINE_CASTLE)
-    switch (region)
-    {
-	case ALS_REGION_OUTDOOR:
-	    b = (b * 10) / 4;
-	    break;
-	case ALS_REGION_UNDEFINED:
-	case ALS_REGION_DARK:
-	    b = b * 5 / 8;
-	    break;
-	default:
-	    break;
-    }
-
-#else // for Pixie and other devices with better ALS
-
-    switch (region)
-    {
-	case ALS_REGION_OUTDOOR:
-	    b = Settings::LunaSettings()->backlightOutdoorScale * b / 100;
-	    break;
-	case ALS_REGION_DIM:
-	    b = Settings::LunaSettings()->backlightDimScale * b / 100;
-	    break;
-	case ALS_REGION_DARK:
-	    b = Settings::LunaSettings()->backlightDarkScale * b / 100;
-	    break;
-	default:
-	    // for all other cases, we use b directly
-	    break;
-    }
-#endif
+		switch (region)
+		{
+		case ALS_REGION_OUTDOOR:
+			b = Settings::LunaSettings()->backlightOutdoorScale * b / 100;
+			break;
+		case ALS_REGION_DIM:
+			b = Settings::LunaSettings()->backlightDimScale * b / 100;
+			break;
+		case ALS_REGION_DARK:
+			b = Settings::LunaSettings()->backlightDarkScale * b / 100;
+			break;
+		default:
+			// for all other cases, we use b directly
+			break;
+		}
     }
 
     if (b < MINIMUM_ON_BRIGHTNESS)
@@ -1996,6 +2179,111 @@ bool DisplayManager::setMaximumBrightness (int maxBrightness, bool save)
     return result;
 }
 
+/*!
+\page com_palm_display
+\n
+\section com_palm_display_status status
+
+\e Public.
+
+com.palm.display/status
+
+Get the status of the display.
+
+\subsection com_palm_display_status_syntax Syntax:
+\code
+{
+    "subscribe": boolean
+}
+\endcode
+
+\param subscribe Subscribe for updates.
+
+\subsection com_palm_display_status_returns Returns:
+\code
+{
+    "returnValue": boolean,
+    "event": string,
+    "state": string,
+    "subscribed": boolean
+}
+\endcode
+
+\param returnValue Indicates if the call was succesful.
+\param event Event that triggered this call.
+\param state State of the display. "Undefined", "dimmed", "off" or "on".
+\param subscribed True if subscribed for updates.
+
+Example response for a succesful call:
+\code
+{
+    "returnValue": true,
+    "event": "request",
+    "state": "off",
+    "subscribed": false
+}
+\endcode
+*/
+
+/*!
+\page com_palm_display_control
+\n
+\section com_palm_display_control_status status
+
+\e Private.
+
+com.palm.display/control/status
+
+Get the status of the display.
+
+\subsection com_palm_display_control_status_syntax Syntax:
+\code
+{
+    "subscribe": boolean
+}
+\endcode
+
+\param subscribe Subscribe for updates.
+
+\subsection com_palm_display_control_status_returns Returns:
+\code
+{
+    "returnValue": boolean,
+    "event": string,
+    "state": string,
+    "timeout": int,
+    "blockDisplay": string,
+    "active": boolean,
+    "subscribed": boolean
+}
+\endcode
+
+\param returnValue Indicates if the call was succesful.
+\param event Event that triggered this call.
+\param state State of the display. "Undefined", "dimmed", "off" or "on".
+\param timeout Time in seconds after which the display turns off.
+\param blockDisplay True if display \e state is blocked from changes.
+\param active True if the timer that shuts down the display after \e timeout seconds of inactivity is running.
+\param subscribed True if subscribed for updates.
+
+\subsection com_palm_display_control_status_examples Examples:
+\code
+luna-send -n 1 -f luna://com.palm.display/control/status '{}'
+\endcode
+
+Example response for a succesful call:
+\code
+{
+    "returnValue": true,
+    "event": "request",
+    "state": "off",
+    "timeout": 120,
+    "blockDisplay": "false",
+    "active": false,
+    "subscribed": false
+}
+\endcode
+*/
 bool DisplayManager::controlStatus(LSHandle *sh, LSMessage *message, void *ctx)
 {
     SUBSCRIBE_SCHEMA_RETURN(sh, message);
@@ -2377,7 +2665,7 @@ void DisplayManager::setActiveTouchpanel (bool enable)
 
 void DisplayManager::setTouchpanelMode (bool active)
 {
-#if defined (TARGET_DEVICE)
+#if defined(HAS_NYX)
     LSError lserror;
     LSErrorInit (&lserror);
     nyx_error_t err;
@@ -2411,7 +2699,7 @@ void DisplayManager::setAlsDisabled (bool disable)
 
 bool DisplayManager::touchPanelOn ()
 {
-#if defined (TARGET_DEVICE)
+#if defined(HAS_NYX)
     InputControl* ic = HostBase::instance()->getInputControlTouchpanel();
     if (NULL != ic)
     {
@@ -2424,7 +2712,7 @@ bool DisplayManager::touchPanelOn ()
 
 bool DisplayManager::touchPanelOff ()
 {
-#if defined (TARGET_DEVICE)
+#if defined(HAS_NYX)
     InputControl* ic = HostBase::instance()->getInputControlTouchpanel();
     if (NULL != ic)
     {
@@ -3253,7 +3541,7 @@ void DisplayManager::displayOff()
 
 bool DisplayManager::allowSuspend()
 {
-#if defined (MACHINE_BROADWAY)
+#if defined(MACHINE_BROADWAY)
 	return (currentState() == DisplayStateOff || currentState() == DisplayStateOffOnCall) && !m_backlightIsOn;
 #else
 	return currentState() == DisplayStateOff && !m_backlightIsOn;
